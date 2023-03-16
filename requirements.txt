@@ -1,0 +1,13 @@
+diffusers[torch]==0.14.0
+transformers
+accelerate
+ftfy
+einops
+albumentations==0.4.3
+kornia
+blobfile>=1.0.5
+wandb
+natsort
+safetensors
+datasets
+bitsandbytes

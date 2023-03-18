@@ -17,12 +17,13 @@ from accelerate import Accelerator
 from accelerate.utils import set_seed
 from datasets import load_dataset
 from transformers import CLIPTokenizer
-from diffusers import DDPMScheduler, AutoencoderKL
+from diffusers import DDPMScheduler, AutoencoderKL, DDIMScheduler
 from diffusers.utils.import_utils import is_xformers_available
 from diffusers.optimization import get_scheduler
 from e4t.models.modeling_clip import CLIPTextModel
 from e4t.encoder import E4TEncoder
-from e4t.utils import load_e4t_unet, load_e4t_encoder, save_e4t_unet, save_e4t_encoder
+from e4t.pipeline_stable_diffusion_e4t import StableDiffusionE4TPipeline
+from e4t.utils import load_e4t_unet, load_e4t_encoder, save_e4t_unet, save_e4t_encoder, image_grid
 
 
 def parse_args():
@@ -49,14 +50,14 @@ def parse_args():
     parser.add_argument("--num_train_epochs", type=int, default=1,)
     parser.add_argument("--max_train_steps", type=int, default=30000, help="Total number of training steps to perform. For face, 30,000. For cat, 60,000. For art, 100,000",)
     parser.add_argument("--dataloader_num_workers", type=int, default=0, help="Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process.")
-    parser.add_argument("--checkpointing_steps", type=int, default=1000, help="Save a checkpoint of the training state every X updates. These checkpoints are only suitable for resuming training using `--resume_from_checkpoint`")
+    parser.add_argument("--checkpointing_steps", type=int, default=10000, help="Save a checkpoint of the training state every X updates.")
+    parser.add_argument("--log_steps", type=int, default=1000, help="sample images ")
     parser.add_argument("--enable_xformers_memory_efficient_attention", action="store_true", help="Whether or not to use xformers.")
-    # parser.add_argument("--resume_from_checkpoint", type=str, default=None,
-    #     help=(
-    #         "Whether training should be resumed from a previous checkpoint. Use a path saved by"
-    #         ' `--checkpointing_steps`, or `"latest"` to automatically select the last available checkpoint.'
-    #     ),
-    # )
+    # log
+    parser.add_argument("--save_sample_prompt", type=str, default="a photo of *s,a photo of *s in the style of monet", help="split with ',' for multiple prompts")
+    parser.add_argument("--n_save_sample", type=int, default=2, help="The number of samples per prompt")
+    parser.add_argument("--save_guidance_scale", type=float, default=7.5, help="CFG for save sample.")
+    parser.add_argument("--save_inference_steps", type=int, default=50, help="The number of inference steps for save sample.",)
     # general
     parser.add_argument("--report_to", type=str, default="wandb", choices=["tensorboard", "wandb"])
     parser.add_argument("--revision", type=str, default=None, required=False, help="Revision of pretrained model identifier from huggingface.co/models.", )
@@ -284,6 +285,48 @@ def main():
     print(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
     print(f"  Total optimization steps = {args.max_train_steps}")
 
+    def txt2img(step):
+        if accelerator.is_main_process:
+            pipeline = StableDiffusionE4TPipeline.from_pretrained(
+                args.pretrained_model_name_or_path,
+                unet=accelerator.unwrap_model(unet, keep_fp32_wrapper=True),
+                text_encoder=text_encoder,
+                tokenizer=tokenizer,
+                vae=vae,
+                e4t_encoder=accelerator.unwrap_model(e4t_encoder, keep_fp32_wrapper=True),
+                safety_checker=None,
+                requires_safety_checker=False,
+                torch_dtype=torch.float16,
+            )
+            pipeline.scheduler = DDIMScheduler.from_config(pipeline.scheduler.config)
+            if is_xformers_available():
+                pipeline.enable_xformers_memory_efficient_attention()
+            pipeline = pipeline.to(accelerator.device)
+            g_cuda = torch.Generator(device=accelerator.device).manual_seed(args.seed)
+            pipeline.set_progress_bar_config(disable=True)
+            sample_dir = os.path.join(args.output_dir, "samples")
+            os.makedirs(sample_dir, exist_ok=True)
+            prompts = args.save_sample_prompt.split(",")
+            image_list = []
+            with torch.autocast("cuda"), torch.inference_mode():
+                for save_prompt in tqdm(prompts, desc="Generating samples"):
+                    for i in range(args.n_save_sample):
+                        images = pipeline(
+                            save_prompt,
+                            guidance_scale=args.save_guidance_scale,
+                            num_inference_steps=args.save_inference_steps,
+                            generator=g_cuda
+                        ).images
+                        image_list.append(images[0])
+            grid = image_grid(image_list, rows=len(prompts), cols=args.n_save_sample)
+            grid.save(os.path.join(sample_dir, f"{step}-{i}.png"))
+            if args.report_to == "wandb":
+                import wandb
+                accelerator.log({"image": wandb.Image(grid)}, step=step)
+            del pipeline
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
     def save_weights(step):
         # Create the pipeline using using the trained modules and save it.
         if accelerator.is_main_process:
@@ -383,10 +426,12 @@ def main():
                     progress_bar.update(1)
                     global_step += 1
                     if global_step % args.checkpointing_steps == 0:
-                        if accelerator.is_main_process:
-                            save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
-                            accelerator.save_state(save_path)
-                            print(f"Saved state to {save_path}")
+                        # save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
+                        # accelerator.save_state(save_path)
+                        # print(f"Saved state to {save_path}")
+                        save_weights(global_step)
+                    if global_step % args.log_steps == 0:
+                        txt2img(global_step)
 
                 logs = {
                     "loss": loss.detach().item(),

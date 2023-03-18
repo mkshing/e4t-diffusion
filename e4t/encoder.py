@@ -54,6 +54,7 @@ class E4TEncoder(nn.Module):
         # in huggingface implementation, the 1st hidden states represents the output of input embedding.
         clip_hidden_states = outputs.hidden_states[1:]
         clip_hidden_states = clip_hidden_states[1::2]  # take every 2nd layer
+        # TODO: need normalization at last?
         clip_hidden_states = [
             self.linear(self.clip_vision.vision_model.post_layernorm(hidden_states[:, 0, :])) for hidden_states in clip_hidden_states
         ]
@@ -117,12 +118,13 @@ if __name__ == '__main__':
         block_out_channels=unet.config.block_out_channels,
         clip_model="openai/clip-vit-base-patch32" # only for test instead of "openai/clip-vit-large-patch14"
     )
-    a = e4t_encoder.linear.weight.data.clone()
+    # a = e4t_encoder.linear.weight.data.clone()
     processor = make_transforms(resolution)
     print("loaded models")
     # optimizer
     # encoder
-    optim_params = [p for p in e4t_encoder.parameters() if p.requires_grad]
+    # optim_params = [p for p in e4t_encoder.parameters() if p.requires_grad]
+    optim_params = []
     # weight offsets
     for n, p in unet.named_parameters():
         if "wo" in n:
@@ -169,7 +171,8 @@ if __name__ == '__main__':
     e4t_encoder.train()
     optimizer.zero_grad()
     # print(e4t_encoder.linear.weight.data)
-    # print(optim_params[-1].data)
+    print(optim_params[-1].data)
+    print(optim_params[40].data)
 
     # run encoder!
     encoder_outputs = unet(noisy_latents, timesteps, encoder_hidden_states_for_e4t, return_encoder_outputs=True)
@@ -187,8 +190,9 @@ if __name__ == '__main__':
     print(f"loss: {loss}, loss_diff: {loss_diff}, loss_reg: {loss_reg}")
     loss.backward()
     optimizer.step()
-    print(torch.equal(a, e4t_encoder.linear.weight.data))
+    # print(torch.equal(a, e4t_encoder.linear.weight.data))
     # print(e4t_encoder.linear.weight.data)
-    # print(optim_params[-1].data)
+    print(optim_params[-1].data)
     weight_offsets_sd = {k: v for k, v in unet.state_dict().items() if "wo" in k}
     # torch.save(weight_offsets_sd, "weight_offsets.pt")
+    print(optim_params[40].data)

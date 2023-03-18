@@ -1,5 +1,5 @@
 # E4T-diffusion
-An implementation of [Designing an Encoder for Fast Personalization of Text-to-Image Models](https://arxiv.org/abs/2302.12228) by using d🧨ffusers. 
+An implementation of [Encoder-based Domain Tuning for Fast Personalization of Text-to-Image Models](https://arxiv.org/abs/2302.12228) by using d🧨ffusers. 
 
 My summary tweet is found [here](https://twitter.com/mk1stats/status/1630891691623448576).
 
@@ -10,8 +10,6 @@ My summary tweet is found [here](https://twitter.com/mk1stats/status/16308916916
 $ git clone https://github.com/mkshing/e4t-diffusion.git
 $ cd e4t-diffusion
 $ pip install -r requirements.txt
-# optional
-$ pip install -q -U --pre triton xformers
 ```
 
 ## Pre-training

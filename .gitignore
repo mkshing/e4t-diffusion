@@ -56,3 +56,4 @@ wandb
 pretrained-*
 tuning-*
 models
+*.sh

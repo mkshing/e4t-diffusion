@@ -11,3 +11,4 @@ natsort
 safetensors
 datasets
 bitsandbytes
+xformers

@@ -40,23 +40,29 @@ class StableDiffusionE4TPipeline(StableDiffusionPipeline):
             feature_extractor,
             e4t_config,
             requires_safety_checker: bool = True,
+            already_added_placeholder_token: bool = False,
     ):
         super().__init__(vae, text_encoder, tokenizer, unet, scheduler, safety_checker, feature_extractor, requires_safety_checker)
-        self.e4t_encoder = e4t_encoder
-        self.e4t_config = e4t_config
         # Add the placeholder token in tokenizer
-        num_added_tokens = self.tokenizer.add_tokens(self.e4t_config.placeholder_token)
-        if num_added_tokens == 0:
-            raise ValueError(
-                f"The tokenizer already contains the token {self.e4t_config.placeholder_token}. Please pass a different `placeholder_token` that is not already in the tokenizer.")
-        self.placeholder_token_id = tokenizer.convert_tokens_to_ids(self.e4t_config.placeholder_token)
-        # Resize the token embeddings as we are adding new special tokens to the tokenizer
-        text_encoder.resize_token_embeddings(len(tokenizer))
+        if not already_added_placeholder_token:
+            num_added_tokens = self.tokenizer.add_tokens(e4t_config.placeholder_token)
+            if num_added_tokens == 0:
+                raise ValueError(
+                    f"The tokenizer already contains the token {e4t_config.placeholder_token}. Please pass a different `placeholder_token` that is not already in the tokenizer.")
+            # Resize the token embeddings as we are adding new special tokens to the tokenizer
+            text_encoder.resize_token_embeddings(len(tokenizer))
+        self.placeholder_token_id = tokenizer.convert_tokens_to_ids(e4t_config.placeholder_token)
         # save class embed
-        domain_class_token_id = self.tokenizer(self.e4t_config.domain_class_token, add_special_tokens=False, return_tensors="pt").input_ids[0]
+        domain_class_token_id = self.tokenizer(e4t_config.domain_class_token, add_special_tokens=False, return_tensors="pt").input_ids[0]
         assert domain_class_token_id.size(0) == 1
         # get class token embedding
-        self.class_embed = text_encoder.get_input_embeddings()(domain_class_token_id)
+        self.class_embed = text_encoder.get_input_embeddings()(domain_class_token_id.to(text_encoder.device))
+        self.register_modules(
+            # class_embed=class_embed,
+            # placeholder_token_id=placeholder_token_id,
+            e4t_encoder=e4t_encoder,
+            e4t_config=e4t_config
+        )
 
     def prepare_for_e4t(self, prompt, device):
         input_ids_for_encoder = self.tokenizer(

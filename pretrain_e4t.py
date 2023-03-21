@@ -1,5 +1,7 @@
 import os
 import argparse
+import random
+
 from packaging import version
 import math
 import json
@@ -8,7 +10,9 @@ import blobfile as bf
 import itertools
 
 import numpy as np
+from PIL import Image
 import albumentations
+from einops import rearrange
 import torch
 from torch.nn import functional as F
 from torch.utils.data import Dataset, DataLoader
@@ -229,6 +233,17 @@ def main():
         train_dataset = train_dataset.with_format("torch")
         train_dataloader = DataLoader(train_dataset, batch_size=args.train_batch_size, collate_fn=collate_fn)
 
+    images_to_log = []
+    for batch in train_dataloader:
+        images = batch["pixel_values"]
+        # to pil
+        x_samples = torch.clamp((images + 1.0) / 2.0, min=0.0, max=1.0)
+        for x_sample in x_samples:
+            x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
+            img = Image.fromarray(x_sample.astype(np.uint8))
+            images_to_log.append(img)
+        if len(images_to_log) > 20:
+            break
     # For mixed precision training we cast the unet and vae weights to half-precision
     # as these models are only used for inference, keeping weights in full precision is not required.
     weight_dtype = torch.float32
@@ -294,6 +309,8 @@ def main():
                 tokenizer=tokenizer,
                 vae=vae,
                 e4t_encoder=accelerator.unwrap_model(e4t_encoder, keep_fp32_wrapper=True),
+                e4t_config=args,
+                already_added_placeholder_token=True,
                 safety_checker=None,
                 requires_safety_checker=False,
                 torch_dtype=torch.float16,
@@ -308,6 +325,8 @@ def main():
             os.makedirs(sample_dir, exist_ok=True)
             prompts = args.save_sample_prompt.split(",")
             image_list = []
+            selected_images_to_log = random.sample(images_to_log, len(prompts)*args.n_save_sample)
+            idx = 0
             with torch.autocast("cuda"), torch.inference_mode():
                 for save_prompt in tqdm(prompts, desc="Generating samples"):
                     for i in range(args.n_save_sample):
@@ -315,14 +334,24 @@ def main():
                             save_prompt,
                             guidance_scale=args.save_guidance_scale,
                             num_inference_steps=args.save_inference_steps,
-                            generator=g_cuda
+                            generator=g_cuda,
+                            image=selected_images_to_log[idx],
                         ).images
                         image_list.append(images[0])
-            grid = image_grid(image_list, rows=len(prompts), cols=args.n_save_sample)
-            grid.save(os.path.join(sample_dir, f"{step}-{i}.png"))
+                        idx += 1
+            input_grid = image_grid(selected_images_to_log, rows=len(prompts), cols=args.n_save_sample)
+            sample_grid = image_grid(image_list, rows=len(prompts), cols=args.n_save_sample)
+            input_grid.save(os.path.join(sample_dir, f"input-{step}.png"))
+            sample_grid.save(os.path.join(sample_dir, f"sample-{step}.png"))
             if args.report_to == "wandb":
                 import wandb
-                accelerator.log({"image": wandb.Image(grid)}, step=step)
+                accelerator.log(
+                    {
+                        "train/inputs": wandb.Image(input_grid),
+                        "train/samples": wandb.Image(sample_grid)
+                    },
+                    step=step
+                )
             del pipeline
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -354,7 +383,9 @@ def main():
     class_embed = text_encoder.get_input_embeddings()(domain_class_token_id.to(accelerator.device))
     # TODO: empty string is good for encoder?
     input_ids_for_encoder = tokenizer(
-        "", padding="max_length", truncation=True, max_length=tokenizer.model_max_length,
+        # "",
+        args.prompt_template.format(placeholder_token=args.domain_class_token),
+        padding="max_length", truncation=True, max_length=tokenizer.model_max_length,
         return_tensors="pt"
     ).input_ids
     prompt = args.prompt_template.format(placeholder_token=args.placeholder_token)
@@ -430,14 +461,15 @@ def main():
                         # accelerator.save_state(save_path)
                         # print(f"Saved state to {save_path}")
                         save_weights(global_step)
-                    if global_step % args.log_steps == 0:
+                    # log at first step
+                    if global_step == 1 or global_step % args.log_steps == 0:
                         txt2img(global_step)
 
                 logs = {
-                    "loss": loss.detach().item(),
-                    "loss_diff": loss_diff.detach().item(),
-                    "loss_reg": loss_reg.detach().item(),
-                    "lr": lr_scheduler.get_last_lr()[0]
+                    "train/loss": loss.detach().item(),
+                    "train/loss_diff": loss_diff.detach().item(),
+                    "train/loss_reg": loss_reg.detach().item(),
+                    "train/lr": lr_scheduler.get_last_lr()[0]
                 }
                 progress_bar.set_postfix(**logs)
                 accelerator.log(logs, step=global_step)

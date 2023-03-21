@@ -3,10 +3,12 @@ import kornia
 import torch
 from torch import nn
 from transformers import CLIPVisionModel, CLIPImageProcessor
+from diffusers.models.modeling_utils import ModelMixin
+from diffusers.configuration_utils import ConfigMixin, register_to_config
 
 
-class E4TEncoder(nn.Module):
-
+class E4TEncoder(ModelMixin, ConfigMixin):
+    @register_to_config
     def __init__(
             self,
             word_embedding_dim=768,

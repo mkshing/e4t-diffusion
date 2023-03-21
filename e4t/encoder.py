@@ -58,9 +58,8 @@ class E4TEncoder(nn.Module):
         clip_hidden_states = [
             self.linear(self.clip_vision.vision_model.post_layernorm(hidden_states[:, 0, :])) for hidden_states in clip_hidden_states
         ]
-        clip_hidden_states = torch.cat(clip_hidden_states)
+        clip_hidden_states = torch.stack(clip_hidden_states)
         clip_hidden_states = torch.mean(clip_hidden_states, dim=0)
-        clip_hidden_states = clip_hidden_states.expand(1, -1)
         # unet pooling
         pooled_outputs = [self.act(sample.mean(dim=(2, 3))) for sample in unet_down_block_samples]
         pooled_outputs = [self.act(clip_hidden_states)] + pooled_outputs

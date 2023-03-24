@@ -38,7 +38,7 @@ class StableDiffusionE4TPipeline(StableDiffusionPipeline):
             scheduler,
             safety_checker,
             feature_extractor,
-            e4t_config,
+            e4t_config = None,
             requires_safety_checker: bool = True,
             already_added_placeholder_token: bool = False,
     ):
@@ -51,18 +51,15 @@ class StableDiffusionE4TPipeline(StableDiffusionPipeline):
                     f"The tokenizer already contains the token {e4t_config.placeholder_token}. Please pass a different `placeholder_token` that is not already in the tokenizer.")
             # Resize the token embeddings as we are adding new special tokens to the tokenizer
             text_encoder.resize_token_embeddings(len(tokenizer))
+        self.placeholder_token = e4t_config.placeholder_token
         self.placeholder_token_id = tokenizer.convert_tokens_to_ids(e4t_config.placeholder_token)
         # save class embed
         domain_class_token_id = self.tokenizer(e4t_config.domain_class_token, add_special_tokens=False, return_tensors="pt").input_ids[0]
         assert domain_class_token_id.size(0) == 1
         # get class token embedding
         self.class_embed = text_encoder.get_input_embeddings()(domain_class_token_id.to(text_encoder.device))
-        self.register_modules(
-            # class_embed=class_embed,
-            # placeholder_token_id=placeholder_token_id,
-            e4t_encoder=e4t_encoder,
-            e4t_config=e4t_config
-        )
+        self.domain_embed_scale = e4t_config.domain_embed_scale
+        self.register_modules(e4t_encoder=e4t_encoder)
 
     def prepare_for_e4t(self, prompt, device):
         input_ids_for_encoder = self.tokenizer(
@@ -79,7 +76,7 @@ class StableDiffusionE4TPipeline(StableDiffusionPipeline):
         try:
             placeholder_token_id_idx = input_ids[0].tolist().index(self.placeholder_token_id)
         except ValueError:
-            raise ValueError(f"Your prompt may not have the placeholder_token={self.e4t_config.placeholder_token}")
+            raise ValueError(f"Your prompt may not have the placeholder_token={self.placeholder_token}")
         # Get the text embedding for e4t conditioning
         encoder_hidden_states_for_e4t = self.text_encoder(input_ids_for_encoder.to(device))[0]
         # Get the text embedding
@@ -194,7 +191,7 @@ class StableDiffusionE4TPipeline(StableDiffusionPipeline):
                 pixel_values = image.expand(bsz, -1, -1, -1).to(device)
                 domain_embed = self.e4t_encoder(x=pixel_values, unet_down_block_samples=encoder_outputs["down_block_samples"])
                 # update word embedding
-                domain_embed = self.class_embed.clone().expand(bsz, -1).to(device) + self.e4t_config.domain_embed_scale * domain_embed
+                domain_embed = self.class_embed.clone().expand(bsz, -1).to(device) + self.domain_embed_scale * domain_embed
                 inputs_embeds_forward = e4t_inputs["inputs_embeds"].expand(bsz, -1, -1).clone().to(dtype=self.text_encoder.dtype, device=device)
                 inputs_embeds_forward[:, e4t_inputs["placeholder_token_id_idx"], :] = domain_embed
                 # Get the text embedding for conditioning

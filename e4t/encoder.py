@@ -5,9 +5,10 @@ from torch import nn
 from transformers import CLIPVisionModel, CLIPImageProcessor
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.configuration_utils import ConfigMixin, register_to_config
+import open_clip
 
 
-class E4TEncoder(ModelMixin, ConfigMixin):
+class E4TEncoderLegacy(ModelMixin, ConfigMixin):
     @register_to_config
     def __init__(
             self,
@@ -15,9 +16,12 @@ class E4TEncoder(ModelMixin, ConfigMixin):
             block_out_channels=(320, 640, 1280, 1280),
             clip_model="openai/clip-vit-large-patch14",
             antialias=False,
+            freeze_clip_vision=True,
     ):
         super().__init__()
-        self.clip_vision = CLIPVisionModel.from_pretrained(clip_model).requires_grad_(False)
+        self.clip_vision = CLIPVisionModel.from_pretrained(clip_model)
+        if freeze_clip_vision:
+            self.clip_vision.requires_grad_(False)
         # encoder
         self.linear = nn.Linear(
             self.clip_vision.config.hidden_size,
@@ -58,7 +62,8 @@ class E4TEncoder(ModelMixin, ConfigMixin):
         clip_hidden_states = clip_hidden_states[1::2]  # take every 2nd layer
         # TODO: need normalization at last?
         clip_hidden_states = [
-            self.linear(self.clip_vision.vision_model.post_layernorm(hidden_states[:, 0, :])) for hidden_states in clip_hidden_states
+            self.linear(self.clip_vision.vision_model.post_layernorm(hidden_states[:, 0, :])) for hidden_states in
+            clip_hidden_states
         ]
         clip_hidden_states = torch.stack(clip_hidden_states)
         clip_hidden_states = torch.mean(clip_hidden_states, dim=0)
@@ -68,6 +73,99 @@ class E4TEncoder(ModelMixin, ConfigMixin):
         pooled_outputs = torch.cat(pooled_outputs, dim=1)
         # final linear layer
         return self.final_linear(pooled_outputs)
+
+
+class E4TEncoder(ModelMixin, ConfigMixin):
+    @register_to_config
+    def __init__(
+            self,
+            word_embedding_dim=768,
+            block_out_channels=(320, 640, 1280, 1280),
+            arch="ViT-H-14", 
+            version="laion2b_s32b_b79k",
+            antialias=False,
+            freeze_clip_vision=True,
+            **kwargs
+    ):
+        super().__init__()
+        model, _, _ = open_clip.create_model_and_transforms(arch, device=torch.device('cpu'), pretrained=version)
+        del model.transformer
+        self.clip_vision = model.visual
+        self.clip_vision.output_tokens = True
+        # remove proj
+        self.clip_vision.proj = None
+        clip_vision_hidden_size = self.clip_vision.ln_post.normalized_shape[0]
+        if freeze_clip_vision:
+            self.clip_vision.requires_grad_(False)
+        # unet
+        self.unet_feature_embedder = nn.Sequential(
+            nn.Linear(10880, clip_vision_hidden_size),
+            nn.LeakyReLU(),
+            nn.Linear(clip_vision_hidden_size, clip_vision_hidden_size)
+        )
+        self.feature_linear = nn.Linear(2*clip_vision_hidden_size, clip_vision_hidden_size)
+
+        self.first_linears = nn.ModuleList([])
+        if arch == "ViT-H-14":
+            # every odd resblock in the OpenCLIP implementation
+            n_odd_layers = 128 + 1
+        else:
+            n_odd_layers = kwargs.get("n_odd_layers", None)
+            assert n_odd_layers is not None, "You must specify `n_odd_layers`!"
+            n_odd_layers = int(n_odd_layers)
+
+        for _ in range(n_odd_layers):
+            self.first_linears.append(
+                nn.Linear(
+                    clip_vision_hidden_size,
+                    clip_vision_hidden_size,
+                )
+            )
+        self.act = nn.LeakyReLU()
+        self.final_linear = nn.Linear(clip_vision_hidden_size, word_embedding_dim)
+        self.image_size = 224
+        self.antialias = antialias
+        self.register_buffer('mean', torch.Tensor([0.48145466, 0.4578275, 0.40821073]), persistent=False)
+        self.register_buffer('std', torch.Tensor([0.26862954, 0.26130258, 0.27577711]), persistent=False)
+
+    def preprocess(self, x):
+        # normalize to [0,1]
+        x = kornia.geometry.resize(
+            x, (self.image_size, self.image_size), interpolation='bicubic', align_corners=True, antialias=self.antialias
+        )
+        x = (x + 1.) / 2.
+        # renormalize according to clip
+        x = kornia.enhance.normalize(x, self.mean, self.std)
+        return x
+
+    def forward(self, x, unet_down_block_samples: tuple):
+        """
+        Inputs:
+            - x: tensor of image
+        """
+        # unet pooling
+        unet_down_block_samples = [sample.mean(dim=(2, 3)) for sample in unet_down_block_samples]
+        unet_pooled_features = torch.cat(unet_down_block_samples, dim=-1)
+        unet_pooled_features = self.unet_feature_embedder(unet_pooled_features)
+
+        # clip feature extractor
+        # x is assumed to be in range [-1,1]
+        x = self.preprocess(x)
+        pooled_output, hidden_states = self.clip_vision(x)
+        hidden_states = hidden_states[:, 1::2, :] # take every 2nd layer 
+        hidden_states = torch.cat([pooled_output.unsqueeze(1), hidden_states], dim=1)
+        n_layers = hidden_states.size(1)
+        clip_hidden_states_list = []
+        for i in range(n_layers):
+            clip_hidden_states = self.feature_linear(torch.cat([hidden_states[:, i, :], unet_pooled_features], dim=-1))
+            clip_hidden_states = self.first_linears[i](clip_hidden_states)
+            clip_hidden_states_list.append(clip_hidden_states)
+        clip_hidden_states = torch.stack(clip_hidden_states_list)
+        # average pooling
+        clip_hidden_states = torch.mean(clip_hidden_states, dim=0)
+        clip_hidden_states = self.act(clip_hidden_states)
+        # final linear layer
+        return self.final_linear(clip_hidden_states)
 
 
 if __name__ == '__main__':
@@ -91,7 +189,7 @@ if __name__ == '__main__':
         return albumentations.Compose([rescaler, cropper])
 
 
-    model_id = "runwayml/stable-diffusion-v1-5"
+    model_id = "CompVis/stable-diffusion-v1-4"
     img = skimage.data.astronaut() # numpy uint8
     resolution = 512
     placeholder_token = "*s"
@@ -117,15 +215,15 @@ if __name__ == '__main__':
     e4t_encoder = E4TEncoder(
         word_embedding_dim=text_encoder.config.hidden_size,
         block_out_channels=unet.config.block_out_channels,
-        clip_model="openai/clip-vit-base-patch32" # only for test instead of "openai/clip-vit-large-patch14"
+        arch="ViT-H-14",
+        version="laion2B-s34B-b79K"
     )
-    # a = e4t_encoder.linear.weight.data.clone()
     processor = make_transforms(resolution)
     print("loaded models")
     # optimizer
     # encoder
-    # optim_params = [p for p in e4t_encoder.parameters() if p.requires_grad]
-    optim_params = []
+    optim_params = [p for p in e4t_encoder.parameters() if p.requires_grad]
+    # optim_params = []
     # weight offsets
     for n, p in unet.named_parameters():
         if "wo" in n:
@@ -133,7 +231,9 @@ if __name__ == '__main__':
     total_params = sum(p.numel() for p in optim_params)
     print(f"{e4t_encoder.__class__.__name__} has {total_params * 1.e-6:.2f} M params.")
     optimizer = torch.optim.AdamW(optim_params, lr=1e-3)
-
+    a = optim_params[-1].data.clone()
+    b = optim_params[5].data.clone()
+    
     # unet.requires_grad_(False)
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
@@ -146,8 +246,8 @@ if __name__ == '__main__':
     img = processor(image=img)["image"]
     img = (img / 127.5 - 1.0).astype(np.float32)
     pixel_values = torch.from_numpy(img).permute(2, 0, 1)
-    # batch-size=1
-    pixel_values = pixel_values.unsqueeze(0)
+    bsz = 3
+    pixel_values = pixel_values.unsqueeze(0).expand(bsz, -1, -1, -1)
     latents = vae.encode(pixel_values).latent_dist.sample().detach()
     latents = latents * vae.config.scaling_factor
     noise = torch.randn_like(latents)
@@ -171,18 +271,17 @@ if __name__ == '__main__':
     unet.train()
     e4t_encoder.train()
     optimizer.zero_grad()
-    # print(e4t_encoder.linear.weight.data)
-    print(optim_params[-1].data)
-    print(optim_params[40].data)
 
     # run encoder!
     encoder_outputs = unet(noisy_latents, timesteps, encoder_hidden_states_for_e4t, return_encoder_outputs=True)
     domain_embed = e4t_encoder(x=pixel_values, unet_down_block_samples=encoder_outputs["down_block_samples"])
     # update word embedding
-    domain_embed = class_embed + domain_embed_scale * domain_embed
+    domain_embed = class_embed.clone().expand(bsz, -1) + domain_embed_scale * domain_embed
 
     token_embeds = text_encoder.get_input_embeddings().weight.data
-    token_embeds[placeholder_token_id] = domain_embed
+    inputs_embeds_forward = token_embeds.expand(bsz, -1, -1).clone()
+    inputs_embeds_forward[:, placeholder_token_id, :] = domain_embed
+
     encoder_hidden_states = text_encoder(input_ids)[0]
     model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
     loss_diff = torch.nn.functional.mse_loss(model_pred.float(), noise.float(), reduction="mean")
@@ -191,9 +290,7 @@ if __name__ == '__main__':
     print(f"loss: {loss}, loss_diff: {loss_diff}, loss_reg: {loss_reg}")
     loss.backward()
     optimizer.step()
-    # print(torch.equal(a, e4t_encoder.linear.weight.data))
-    # print(e4t_encoder.linear.weight.data)
-    print(optim_params[-1].data)
-    weight_offsets_sd = {k: v for k, v in unet.state_dict().items() if "wo" in k}
+    print(torch.equal(a, optim_params[-1].data))
+    print(torch.equal(b, optim_params[5].data))
+    # weight_offsets_sd = {k: v for k, v in unet.state_dict().items() if "wo" in k}
     # torch.save(weight_offsets_sd, "weight_offsets.pt")
-    print(optim_params[40].data)

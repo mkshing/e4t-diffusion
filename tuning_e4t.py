@@ -4,6 +4,7 @@ from packaging import version
 import json
 from tqdm.auto import tqdm
 import itertools
+import random
 
 import numpy as np
 from PIL import Image
@@ -19,6 +20,7 @@ from diffusers.utils import is_xformers_available, load_image
 from diffusers.optimization import get_scheduler
 from e4t.models.modeling_clip import CLIPTextModel
 from e4t.utils import load_config_from_pretrained, load_e4t_unet, load_e4t_encoder, save_e4t_unet, save_e4t_encoder
+from pretrain_e4t import templates, art_templates, face_templates
 
 
 def parse_args():
@@ -28,7 +30,9 @@ def parse_args():
     parser.add_argument("--domain_embed_scale", type=float, default=0.1, help="scale of e4t encoder's embedding")
     parser.add_argument("--reg_lambda", type=float, default=1e-4, help="l2 regularization lambda")
     parser.add_argument("--train_image_path", type=str, default=None, required=True, help="a image path or url")
+    parser.add_argument("--prompt_template", type=str, default=None, help="If None, take the template from pretrained args. ")
     # training
+    parser.add_argument("--unfreeze_clip_vision", action="store_true", default=False, help="train clip image encoder as a part of e4t encoder")
     parser.add_argument("--resolution", type=int, default=512)
     parser.add_argument("--seed", type=int, default=42, help="A seed for reproducible training.")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1, help="Number of updates steps to accumulate before performing a backward/update pass.",)
@@ -38,9 +42,11 @@ def parse_args():
     parser.add_argument("--train_batch_size", type=int, default=16, help="Batch size (per device) for the training dataloader.")
     parser.add_argument("--max_train_steps", type=int, default=15, help="Total number of training steps to perform. For face, 30,000. For cat, 60,000. For art, 100,000",)
     parser.add_argument("--dataloader_num_workers", type=int, default=0, help="Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process.")
+    parser.add_argument("--checkpointing_steps", type=int, default=10000,
+                        help="Save a checkpoint of the training state every X updates.")
     parser.add_argument("--enable_xformers_memory_efficient_attention", action="store_true", help="Whether or not to use xformers.")
     # general
-    parser.add_argument("--report_to", type=str, default="wandb", choices=["tensorboard", "wandb"])
+    parser.add_argument("--report_to", type=str, default=None, choices=["tensorboard", "wandb"])
     parser.add_argument("--revision", type=str, default=None, required=False, help="Revision of pretrained model identifier from huggingface.co/models.", )
     parser.add_argument("--output_dir", type=str, default="e4t-model", help="The output directory where the model predictions and checkpoints will be written.", )
     parser.add_argument("--logging_dir", type=str, default="logs")
@@ -62,7 +68,8 @@ def make_transforms(size, random_crop=False):
         cropper = albumentations.CenterCrop(height=size, width=size)
     else:
         cropper = albumentations.RandomCrop(height=size, width=size)
-    return albumentations.Compose([rescaler, cropper])
+    flip = albumentations.HorizontalFlip(p=0.5)
+    return albumentations.Compose([rescaler, cropper, flip])
 
 
 def main():
@@ -90,6 +97,7 @@ def main():
         word_embedding_dim=text_encoder.config.hidden_size,
         block_out_channels=unet.config.block_out_channels,
         clip_model=pretrained_args.clip_model_name_or_path,
+        freeze_clip_vision=not args.unfreeze_clip_vision,
         ckpt_path=args.pretrained_model_name_or_path
     )
     print(f"Loaded the pre-trained model from {args.pretrained_model_name_or_path}")
@@ -146,7 +154,7 @@ def main():
     )
 
     # dataset
-    processor = make_transforms(args.resolution)
+    processor = make_transforms(args.resolution, random_crop=True)
     pil_image = load_image(args.train_image_path)
     image = np.array(pil_image)
     image = processor(image=image)["image"]
@@ -216,27 +224,31 @@ def main():
     assert domain_class_token_id.size(0) == 1
     # get class token embedding
     class_embed = text_encoder.get_input_embeddings()(domain_class_token_id.to(accelerator.device))
-    # TODO: empty string is good for encoder?
     input_ids_for_encoder = tokenizer(
         "", padding="max_length", truncation=True, max_length=tokenizer.model_max_length,
         return_tensors="pt"
     ).input_ids
-    prompt = pretrained_args.prompt_template.format(placeholder_token=pretrained_args.placeholder_token)
-    print(f"prompt: {prompt}")
-    input_ids = tokenizer(
-        prompt, padding="max_length", truncation=True, max_length=tokenizer.model_max_length,
-        return_tensors="pt"
-    ).input_ids
-    placeholder_token_id_idx = input_ids[0].tolist().index(placeholder_token_id)
     # Get the text embedding for e4t conditioning
     encoder_hidden_states_for_e4t = text_encoder(input_ids_for_encoder.to(accelerator.device))[0].to(dtype=weight_dtype)
-    # Get the text embedding
-    inputs_embeds = text_encoder.get_input_embeddings()(input_ids.to(accelerator.device))
+
+    if args.prompt_template is None:
+        args.prompt_template = pretrained_args.prompt_template
+    if args.prompt_template in ["normal", "face", "art"]:
+        if args.prompt_template == "normal":
+            prompt_templates = templates
+        elif args.prompt_template == "face":
+            prompt_templates = face_templates
+        else:
+            prompt_templates = art_templates
+        print(f"Using the default {len(prompt_templates)} templates!")
+    else:
+        assert "{placeholder_token}" in args.prompt_template, "You must specify the location of placeholder token by '{placeholder_token}'"
+        prompt_templates = [args.prompt_template]
     unet.train()
     e4t_encoder.train()
     pixel_values = image.expand(args.train_batch_size, -1, -1, -1).to(dtype=weight_dtype)
     # Convert images to latent space
-    latents = vae.encode(pixel_values).latent_dist.sample().detach()
+    latents = vae.encode(pixel_values.to(accelerator.device)).latent_dist.sample().detach()
     latents = latents * vae.config.scaling_factor
     for step in range(args.max_train_steps):
         with accelerator.accumulate(unet):
@@ -246,7 +258,16 @@ def main():
             # Sample a random timestep for each image
             timesteps = torch.randint(0, noise_scheduler.config.num_train_timesteps, (bsz,), device=latents.device)
             timesteps = timesteps.long()
-
+            # get prompt
+            batch_templates = random.choices(prompt_templates, k=bsz)
+            prompt = [prompt_template.format(placeholder_token=pretrained_args.placeholder_token) for prompt_template in batch_templates]            
+            input_ids = tokenizer(
+                prompt, padding="max_length", truncation=True, max_length=tokenizer.model_max_length,
+                return_tensors="pt"
+            ).input_ids
+            # Get the text embedding
+            inputs_embeds = text_encoder.get_input_embeddings()(input_ids.to(accelerator.device))
+            placeholder_token_id_idxs = [i.index(placeholder_token_id) for i in input_ids.cpu().tolist()]            
             # Add noise to the latents according to the noise magnitude at each timestep
             # (this is the forward diffusion process)
             noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
@@ -257,10 +278,12 @@ def main():
             domain_embed = e4t_encoder(x=pixel_values, unet_down_block_samples=encoder_outputs["down_block_samples"])
             # update word embedding
             domain_embed = class_embed.clone().expand(bsz, -1) + args.domain_embed_scale * domain_embed
-            inputs_embeds_forward = inputs_embeds.expand(bsz, -1, -1).clone()
-            inputs_embeds_forward[:, placeholder_token_id_idx, :] = domain_embed
+
+            for i, placeholder_token_id_idx in enumerate(placeholder_token_id_idxs):
+                inputs_embeds[i, placeholder_token_id_idx, :] = domain_embed[i]
+
             # Get the text embedding for conditioning
-            encoder_hidden_states = text_encoder(inputs_embeds=inputs_embeds_forward)[0].to(dtype=weight_dtype)
+            encoder_hidden_states = text_encoder(inputs_embeds=inputs_embeds)[0].to(dtype=weight_dtype)
             # Predict the noise residual
             model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
             # Get the target for loss depending on the prediction type
@@ -282,15 +305,16 @@ def main():
             lr_scheduler.step()
             optimizer.zero_grad()
 
-        # Checks if the accelerator has performed an optimization step behind the scenes
-        if accelerator.sync_gradients:
-            progress_bar.update(1)
-            global_step += 1
-            if global_step % args.checkpointing_steps == 0:
-                if accelerator.is_main_process:
-                    save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
-                    accelerator.save_state(save_path)
-                    print(f"Saved state to {save_path}")
+        # # Checks if the accelerator has performed an optimization step behind the scenes
+        # if accelerator.sync_gradients:
+        progress_bar.update(1)
+        global_step += 1
+        if global_step % args.checkpointing_steps == 0:
+            # if accelerator.is_main_process:
+            #     save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
+            #     accelerator.save_state(save_path)
+            #     print(f"Saved state to {save_path}")
+            save_weights(global_step)
 
         logs = {
             "loss": loss.detach().item(),

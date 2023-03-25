@@ -64,9 +64,9 @@ def download_from_huggingface(repo, filename, **kwargs):
 
 
 MODELS = {
-    "mshing/e4t-diffusion/pretrained-something": {
-        "repo": "mshing/e4t-diffusion",
-        "subfolder": "pretrained-something"
+    "mshing/e4t-diffusion-ffhq-celebahq-v1": {
+        "repo": "mshing/e4t-diffusion-ffhq-celebahq-v1",
+        "subfolder": "30000"
     }
 }
 FILES = ["weight_offsets.pt", "encoder.pt", "config.json"]
@@ -88,7 +88,7 @@ def load_config_from_pretrained(pretrained_model_name_or_path):
     return pretrained_args
 
 
-def load_e4t_unet(pretrained_model_name_or_path=None, ckpt_path=None):
+def load_e4t_unet(pretrained_model_name_or_path=None, ckpt_path=None, **kwargs):
     assert pretrained_model_name_or_path is not None or ckpt_path is not None
     if pretrained_model_name_or_path is None:
         if os.path.exists(ckpt_path):
@@ -103,8 +103,8 @@ def load_e4t_unet(pretrained_model_name_or_path=None, ckpt_path=None):
                 filename="weight_offsets.pt",
                 subfolder=MODELS[ckpt_path]["subfolder"]
             )
-        pretrained_model_name_or_path = config.pretrained_model_name_or_path if not hasattr(config, "pretrained_args") else config.pretrained_args["pretrained_model_name_or_path"]
-    unet = OriginalUNet2DConditionModel.from_pretrained(pretrained_model_name_or_path, subfolder="unet")
+        pretrained_model_name_or_path = config.pretrained_model_name_or_path if config.pretrained_args is None else config.pretrained_args["pretrained_model_name_or_path"]
+    unet = OriginalUNet2DConditionModel.from_pretrained(pretrained_model_name_or_path, subfolder="unet", **kwargs)
     state_dict = dict(unet.state_dict())
     if ckpt_path:
         if "weight_offsets.pt" not in ckpt_path:
@@ -142,7 +142,6 @@ def load_e4t_encoder(ckpt_path=None, **kwargs):
         state_dict = torch.load(ckpt_path, map_location="cpu")
         print(f"Resuming from {ckpt_path}")
         m, u = encoder.load_state_dict(state_dict, strict=False)
-        m = [k for k in m if "clip_vision" not in k]
         if len(m) > 0:
             raise RuntimeError(f"missing keys:\n{m}")
         if len(u) > 0:
@@ -152,8 +151,7 @@ def load_e4t_encoder(ckpt_path=None, **kwargs):
 
 
 def save_e4t_encoder(model, save_dir):
-    encoder_sd = {k: v for k, v in model.state_dict().items() if "clip_vision" not in k}
-    torch.save(encoder_sd, os.path.join(save_dir, "encoder.pt"))
+    torch.save(model.state_dict(), os.path.join(save_dir, "encoder.pt"))
 
 
 def make_transforms(size, random_crop=False):

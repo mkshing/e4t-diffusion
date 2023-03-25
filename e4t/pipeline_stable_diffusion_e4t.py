@@ -109,8 +109,10 @@ class StableDiffusionE4TPipeline(StableDiffusionPipeline):
         cross_attention_kwargs: Optional[Dict[str, Any]] = None,
         ####################################################
         image: Union[PIL.Image.Image, List[PIL.Image.Image]] = None,
+        domain_embed_scale: Optional[float] = None,
         ####################################################
     ):
+        domain_embed_scale = self.domain_embed_scale if domain_embed_scale is None else domain_embed_scale
         # 0. Default height and width to unet
         height = height or self.unet.config.sample_size * self.vae_scale_factor
         width = width or self.unet.config.sample_size * self.vae_scale_factor
@@ -191,7 +193,7 @@ class StableDiffusionE4TPipeline(StableDiffusionPipeline):
                 pixel_values = image.expand(bsz, -1, -1, -1).to(device)
                 domain_embed = self.e4t_encoder(x=pixel_values, unet_down_block_samples=encoder_outputs["down_block_samples"])
                 # update word embedding
-                domain_embed = self.class_embed.clone().expand(bsz, -1).to(device) + self.domain_embed_scale * domain_embed
+                domain_embed = self.class_embed.clone().expand(bsz, -1).to(device) + domain_embed_scale * domain_embed
                 inputs_embeds_forward = e4t_inputs["inputs_embeds"].expand(bsz, -1, -1).clone().to(dtype=self.text_encoder.dtype, device=device)
                 inputs_embeds_forward[:, e4t_inputs["placeholder_token_id_idx"], :] = domain_embed
                 # Get the text embedding for conditioning

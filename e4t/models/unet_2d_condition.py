@@ -421,7 +421,6 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         return_dict=True,
         #############################
         return_encoder_outputs=False,
-        encoder_outputs=None,
         #############################
     ):
         default_overall_up_factor = 2 ** self.num_upsamplers
@@ -482,42 +481,29 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         sample = self.conv_in(sample)
 
         # 3. down
-        if encoder_outputs is None:
-            if return_encoder_outputs:
-                down_block_samples = tuple()
-            down_block_res_samples = (sample,)
-            for downsample_block in self.down_blocks:
-                if hasattr(downsample_block, "has_cross_attention") and downsample_block.has_cross_attention:
-                    sample, res_samples = downsample_block(
-                        hidden_states=sample,
-                        temb=emb,
-                        encoder_hidden_states=encoder_hidden_states,
-                        attention_mask=attention_mask,
-                        cross_attention_kwargs=cross_attention_kwargs,
-                    )
-                else:
-                    sample, res_samples = downsample_block(hidden_states=sample, temb=emb)
-                if return_encoder_outputs:
-                    down_block_samples += (sample,)
-                down_block_res_samples += res_samples
-            if down_block_additional_residuals is not None:
-                new_down_block_res_samples = ()
-
-                for down_block_res_sample, down_block_additional_residual in zip(
-                        down_block_res_samples, down_block_additional_residuals
-                ):
-                    down_block_res_sample += down_block_additional_residual
-                    new_down_block_res_samples += (down_block_res_sample,)
-
-                down_block_res_samples = new_down_block_res_samples
-            if return_encoder_outputs:
-                return dict(
-                    down_block_samples=down_block_samples,
-                    down_block_res_samples=down_block_res_samples
+        down_block_res_samples = (sample,)
+        for downsample_block in self.down_blocks:
+            if hasattr(downsample_block, "has_cross_attention") and downsample_block.has_cross_attention:
+                sample, res_samples = downsample_block(
+                    hidden_states=sample,
+                    temb=emb,
+                    encoder_hidden_states=encoder_hidden_states,
+                    attention_mask=attention_mask,
+                    cross_attention_kwargs=cross_attention_kwargs,
                 )
-        else:
-            sample = encoder_outputs["down_block_samples"][-1]
-            down_block_res_samples = encoder_outputs["down_block_res_samples"]
+            else:
+                sample, res_samples = downsample_block(hidden_states=sample, temb=emb)
+            down_block_res_samples += res_samples
+        if down_block_additional_residuals is not None:
+            new_down_block_res_samples = ()
+
+            for down_block_res_sample, down_block_additional_residual in zip(
+                    down_block_res_samples, down_block_additional_residuals
+            ):
+                down_block_res_sample += down_block_additional_residual
+                new_down_block_res_samples += (down_block_res_sample,)
+
+            down_block_res_samples = new_down_block_res_samples
         # 4. mid
         if self.mid_block is not None:
             sample = self.mid_block(
@@ -527,6 +513,12 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 attention_mask=attention_mask,
                 cross_attention_kwargs=cross_attention_kwargs,
             )
+
+        if return_encoder_outputs:
+            # In the CompVis's code, the output of mid block also includes.
+            # https://github.com/CompVis/stable-diffusion/blob/main/ldm/modules/diffusionmodules/openaimodel.py#L938
+            down_block_res_samples += (sample,)
+            return dict(down_block_samples=down_block_res_samples)
 
         if mid_block_additional_residual is not None:
             sample += mid_block_additional_residual
@@ -579,29 +571,19 @@ if __name__ == '__main__':
     m, u = unet.load_state_dict(state_dict, strict=False)
     if len(u) > 0:
         raise RuntimeError(f"unexpected keys:\n{u}")
-    optim_params = []
-    for n, p in unet.named_parameters():
-        if "wo" in n:
-            optim_params += [p]
-    total_params = sum(p.numel() for p in optim_params)
-    # 143.23 M
-    print(f"{unet.__class__.__name__} has {total_params * 1.e-6:.2f} M params.")
-    optimizer = torch.optim.AdamW(optim_params, lr=1.e-3)
-
     bsz = 1
     timesteps = torch.randint(0, 1000, (bsz,)).long()
-    x = torch.randn(bsz, 4, 32, 32)
+    x = torch.randn(bsz, 4, 64, 64)
     c = torch.randn(bsz, 77, 768)
     # # run all
     # out = unet(x, timesteps, c).sample
-    print(optim_params[0].data)
     # run!
     encoder_outputs = unet(x, timesteps, c, return_encoder_outputs=True)
-    out2 = unet(x, timesteps, c, encoder_outputs=encoder_outputs).sample
-    # print(torch.equal(out, out2))
-    noise = torch.randn_like(x)  # this is not true
-    loss = torch.nn.functional.mse_loss(noise, out2)
-    print("loss:", loss)
-    loss.backward()
-    optimizer.step()
-    print(optim_params[0].data)
+    unet_down_block_samples = encoder_outputs["down_block_samples"]
+    unet_down_block_samples = [sample.mean(dim=(2, 3)) for sample in unet_down_block_samples]
+    h = torch.cat(unet_down_block_samples, dim=-1)
+    print(h.shape)
+    # bsz, 10880
+
+
+

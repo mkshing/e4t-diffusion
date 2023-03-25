@@ -57,3 +57,4 @@ pretrained-*
 tuning-*
 models
 *.sh
+grid.png

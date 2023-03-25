@@ -66,7 +66,7 @@ def download_from_huggingface(repo, filename, **kwargs):
 MODELS = {
     "mshing/e4t-diffusion-ffhq-celebahq-v1": {
         "repo": "mshing/e4t-diffusion-ffhq-celebahq-v1",
-        "subfolder": "30000"
+        "subfolder": None,
     }
 }
 FILES = ["weight_offsets.pt", "encoder.pt", "config.json"]

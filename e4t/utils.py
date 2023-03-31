@@ -64,7 +64,7 @@ def download_from_huggingface(repo, filename, **kwargs):
 
 
 MODELS = {
-    "mshing/e4t-diffusion-ffhq-celebahq-v1": {
+    "e4t-diffusion-ffhq-celebahq-v1": {
         "repo": "mshing/e4t-diffusion-ffhq-celebahq-v1",
         "subfolder": None,
     }
@@ -90,7 +90,7 @@ def load_config_from_pretrained(pretrained_model_name_or_path):
 
 def load_e4t_unet(pretrained_model_name_or_path=None, ckpt_path=None, **kwargs):
     assert pretrained_model_name_or_path is not None or ckpt_path is not None
-    if pretrained_model_name_or_path is None:
+    if pretrained_model_name_or_path is None or not os.path.exists(ckpt_path):
         if os.path.exists(ckpt_path):
             if "weight_offsets.pt" in ckpt_path:
                 ckpt_path = os.path.dirname(ckpt_path)

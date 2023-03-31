@@ -1,11 +1,15 @@
 # E4T-diffusion
-<!-- <a href=".." target="_parent"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a> -->
+<a href="https://colab.research.google.com/gist/mkshing/d16cb15e82ac7fd2f5dd2e83b00896a3/e4t-diffusion.ipynb" target="_parent"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a>
 
 An implementation of [Encoder-based Domain Tuning for Fast Personalization of Text-to-Image Models](https://arxiv.org/abs/2302.12228) by using d🧨ffusers. 
 
 My summary tweet is found [here](https://twitter.com/mk1stats/status/1630891691623448576).
 
-![paper](e4t-paper.png)
+![paper](assets/e4t-paper.png)
+
+## News 
+### 2023.3.30
+- Release the current-best pre-trained model, trained on CelebA-HQ+FFHQ. Please see [Model Zoo](#model-zoo) for more information.
 
 ## Installation
 ```
@@ -15,6 +19,9 @@ $ pip install -r requirements.txt
 ```
 
 ## Pre-training
+You need a domain-specific E4T pre-trained model corresponding to your target image. 
+If your target image is your face, you need to pre-train on a large face image dataset. 
+Or, if you have an artistic image, you might want to train on WikiArt like so.  
 ```
 accelerate launch pretrain_e4t.py \
   --pretrained_model_name_or_path="CompVis/stable-diffusion-v1-4" \
@@ -39,17 +46,24 @@ accelerate launch pretrain_e4t.py \
   --enable_xformers_memory_efficient_attention 
 ```
 
+### Model Zoo
+- **[e4t-diffusion-ffhq-celebahq-v1](https://huggingface.co/mshing/e4t-diffusion-ffhq-celebahq-v1):** a pre-trained model for face trained on FFHQ+CelebA-HQ. To get better results, I used [Stable unCLIP](https://github.com/Stability-AI/stablediffusion/blob/main/doc/UNCLIP.MD) as data augmentation. But, the quality at the domain-tuning phase is not as good as the paper yet... 
+  ![e4t-diffusion-ffhq-celebahq-v1](assets/e4t-diffusion-ffhq-celebahq-v1-log.png)
+
 ## Domain-tuning
+When you get a pre-trained model, you are ready for domain tuning! 
+Unlike Dreambooth, E4T needs only <15 training steps by using the domain-specific pre-trained model.  
 
 ```
 accelerate launch tuning_e4t.py \
   --pretrained_model_name_or_path="e4t pre-trained model path" \
+  --prompt_template="a photo of {placeholder_token}" \
   --reg_lambda=0.1 \
   --output_dir="path-to-save-model" \
   --train_image_path="image path or url" \
   --resolution=512 \
   --train_batch_size=16 \
-  --learning_rate=5.e-6 \
+  --learning_rate=1.e-6 --scale_lr \
   --max_train_steps=15 \
   --unfreeze_clip_vision \
   --mixed_precision="fp16" \
@@ -57,6 +71,8 @@ accelerate launch tuning_e4t.py \
 ```
 
 ## Inference
+Once your domain-tuning is done, you can do inference by including your placeholder token in the prompt. 
+
 ```
 python inference.py \
   --pretrained_model_name_or_path "e4t pre-trained model path" \
@@ -68,6 +84,9 @@ python inference.py \
   --guidance_scale 7.5
 ```
 
+
+## Acknowledgments
+I would like to thank [Stability AI](https://stability.ai/) for providing the computer resources to test this code and train pre-trained models.
 
 ## Citation
 

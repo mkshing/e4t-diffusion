@@ -1,4 +1,5 @@
 import argparse
+from tqdm import tqdm
 from PIL import Image
 import torch
 from diffusers import (
@@ -106,19 +107,24 @@ def main():
     generator = None
     if args.seed:
         generator = torch.Generator(device=device).manual_seed(args.seed)
-    with torch.autocast(device), torch.inference_mode():
-        images = pipe(
-            args.prompt,
-            num_inference_steps=args.num_inference_steps,
-            guidance_scale=args.guidance_scale,
-            generator=generator,
-            image=image,
-            num_images_per_prompt=args.num_images_per_prompt,
-            height=args.height,
-            width=args.width,
-        ).images
-    grid_image = image_grid(images, 1, args.num_images_per_prompt)
+    prompts = args.prompt.split("::")
+    all_images = []
+    for prompt in tqdm(prompts):
+        with torch.autocast(device), torch.inference_mode():
+            images = pipe(
+                prompt,
+                num_inference_steps=args.num_inference_steps,
+                guidance_scale=args.guidance_scale,
+                generator=generator,
+                image=image,
+                num_images_per_prompt=args.num_images_per_prompt,
+                height=args.height,
+                width=args.width,
+            ).images
+        all_images.extend(images)
+    grid_image = image_grid(all_images, len(prompts), args.num_images_per_prompt)
     grid_image.save("grid.png")
+    print("DONE! See `grid.png` for the results!")
 
 
 if __name__ == '__main__':

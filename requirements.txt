@@ -1,4 +1,6 @@
 diffusers[torch]==0.14.0
+# for image variation
+# git+https://github.com/huggingface/diffusers.git
 transformers
 accelerate
 ftfy
@@ -11,4 +13,5 @@ natsort
 safetensors
 datasets
 bitsandbytes
-xformers
+webdataset
+open-clip-torch

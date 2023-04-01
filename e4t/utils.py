@@ -2,6 +2,7 @@ import os
 import json
 from requests.exceptions import HTTPError
 import huggingface_hub
+from huggingface_hub.utils._errors import EntryNotFoundError
 
 import numpy as np
 import albumentations
@@ -92,25 +93,29 @@ def load_e4t_unet(pretrained_model_name_or_path=None, ckpt_path=None, **kwargs):
     assert pretrained_model_name_or_path is not None or ckpt_path is not None
     if pretrained_model_name_or_path is None or not os.path.exists(ckpt_path):
         if os.path.exists(ckpt_path):
-            if "weight_offsets.pt" in ckpt_path:
-                ckpt_path = os.path.dirname(ckpt_path)
-            config = load_config_from_pretrained(ckpt_path)
+            assert os.path.basename(ckpt_path) == "unet.pt" or os.path.basename(ckpt_path) == "weight_offsets.pt", "You must specify the filename! (`unet.pt` or `weight_offsets.pt`)"
+            config = load_config_from_pretrained(os.path.dirname(ckpt_path))
         else:
             assert ckpt_path in MODELS, f"Choose from {list(MODELS.keys())}"
             config = load_config_from_pretrained(ckpt_path)
-            ckpt_path = download_from_huggingface(
-                repo=MODELS[ckpt_path]["repo"],
-                filename="weight_offsets.pt",
-                subfolder=MODELS[ckpt_path]["subfolder"]
-            )
+            try:
+                ckpt_path = download_from_huggingface(
+                    repo=MODELS[ckpt_path]["repo"],
+                    filename="weight_offsets.pt",
+                    subfolder=MODELS[ckpt_path]["subfolder"]
+                )
+            except EntryNotFoundError:
+                ckpt_path = download_from_huggingface(
+                    repo=MODELS[ckpt_path]["repo"],
+                    filename="unet.pt",
+                    subfolder=MODELS[ckpt_path]["subfolder"]
+                )
         pretrained_model_name_or_path = config.pretrained_model_name_or_path if config.pretrained_args is None else config.pretrained_args["pretrained_model_name_or_path"]
     unet = OriginalUNet2DConditionModel.from_pretrained(pretrained_model_name_or_path, subfolder="unet", **kwargs)
     state_dict = dict(unet.state_dict())
     if ckpt_path:
-        if "weight_offsets.pt" not in ckpt_path:
-            ckpt_path = os.path.join(ckpt_path, "weight_offsets.pt")
-        wo_sd = torch.load(ckpt_path, map_location="cpu")
-        state_dict.update(wo_sd)
+        ckpt_sd = torch.load(ckpt_path, map_location="cpu")
+        state_dict.update(ckpt_sd)
         print(f"Resuming from {ckpt_path}")
     unet = UNet2DConditionModel(**unet.config)
     m, u = unet.load_state_dict(state_dict, strict=False)

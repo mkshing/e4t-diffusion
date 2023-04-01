@@ -1,4 +1,5 @@
 import argparse
+import os
 from tqdm import tqdm
 from PIL import Image
 import torch
@@ -11,6 +12,8 @@ from diffusers import (
     EulerAncestralDiscreteScheduler,
 )
 from diffusers.utils import is_xformers_available
+from transformers import CLIPTokenizer
+from e4t.encoder import E4TEncoder
 from e4t.models.modeling_clip import CLIPTextModel
 from e4t.utils import load_config_from_pretrained, load_e4t_encoder, load_e4t_unet
 from e4t.utils import load_image, AttributeDict
@@ -39,6 +42,8 @@ def parse_args():
     parser.add_argument("--width", type=int, default=512, help="image width, in pixel space",)
     parser.add_argument("--seed", type=int, default=None, help="the seed (for reproducible sampling)")
     parser.add_argument("--scheduler_type", type=str, choices=["ddim", "plms", "lms", "euler", "euler_ancestral", "dpm_solver++"], default="ddim", help="diffusion scheduler type")
+    parser.add_argument("--enable_xformers_memory_efficient_attention", action="store_true", help="Whether or not to use xformers.")
+    
     opt = parser.parse_args()
     return opt
 
@@ -74,11 +79,29 @@ def main():
     # load models
     config = load_config_from_pretrained(args.pretrained_model_name_or_path)
     pretrained_model_name_or_path = getattr_from_config(config, "pretrained_model_name_or_path")
+    # unet
     unet = load_e4t_unet(
-        ckpt_path=args.pretrained_model_name_or_path,
+        ckpt_path=os.path.join(args.pretrained_model_name_or_path, "unet.pt"),
     )
-    
+    # text encoder
+    tokenizer = CLIPTokenizer.from_pretrained(pretrained_model_name_or_path, subfolder="tokenizer")
     text_encoder = CLIPTextModel.from_pretrained(pretrained_model_name_or_path, subfolder="text_encoder")
+    e4t_config = get_e4t_config(config)
+    num_added_tokens = tokenizer.add_tokens(e4t_config.placeholder_token)
+    if num_added_tokens == 0:
+        raise ValueError(
+            f"The tokenizer already contains the token {e4t_config.placeholder_token}. Please pass a different `placeholder_token` that is not already in the tokenizer.")
+    text_encoder.resize_token_embeddings(len(tokenizer))
+    if os.path.exists(os.path.join(args.pretrained_model_name_or_path, "text_encoder.pt")):
+        ckpt_path = os.path.join(args.pretrained_model_name_or_path, "text_encoder.pt")
+        state_dict = torch.load(ckpt_path, map_location="cpu")
+        print(f"Resuming from {ckpt_path}")
+        m, u = text_encoder.load_state_dict(state_dict, strict=False)
+        if len(m) > 0:
+            raise RuntimeError(f"missing keys:\n{m}")
+        if len(u) > 0:
+            raise RuntimeError(f"unexpected keys:\n{u}")
+    # e4t encoder
     e4t_encoder = load_e4t_encoder(
         ckpt_path=args.pretrained_model_name_or_path,
         word_embedding_dim=text_encoder.config.hidden_size,
@@ -89,14 +112,17 @@ def main():
         pretrained_model_name_or_path,
         unet=unet,
         text_encoder=text_encoder,
+        tokenizer=tokenizer,
         e4t_encoder=e4t_encoder,
-        e4t_config=get_e4t_config(config),
+        e4t_config=e4t_config,
         scheduler=SCHEDULER_MAPPING[args.scheduler_type].from_pretrained(pretrained_model_name_or_path, subfolder="scheduler"),
         requires_safety_checker=False,
         safety_checker=None,
         feature_extractor=None,
+        already_added_placeholder_token=True
     )
-    if is_xformers_available():
+    if args.enable_xformers_memory_efficient_attention:
+        assert is_xformers_available()
         pipe.enable_xformers_memory_efficient_attention()
         print("Using xformers!")
     pipe = pipe.to(device)

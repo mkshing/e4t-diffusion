@@ -18,6 +18,14 @@ $ cd e4t-diffusion
 $ pip install -r requirements.txt
 ```
 
+
+## Model Zoo
+- **[e4t-diffusion-ffhq-celebahq-v1](https://huggingface.co/mshing/e4t-diffusion-ffhq-celebahq-v1):** a pre-trained model for face trained on FFHQ+CelebA-HQ. To get better results, I used [Stable unCLIP](https://github.com/Stability-AI/stablediffusion/blob/main/doc/UNCLIP.MD) as data augmentation.  
+  ![e4t-diffusion-ffhq-celebahq-v1](assets/e4t-diffusion-ffhq-celebahq-v1-log.png)
+  logs at the pre-training phase
+  ![yann-in-the-beach](assets/yann-in-the-beach.png)
+  "a photo of *s in the beach" after domain-tuning on a [Yann LeCun's photo](https://engineering.nyu.edu/sites/default/files/styles/square_large_default_1x/public/2018-06/yann-lecun.jpg?h=65172a10&itok=NItwgG8z)
+  
 ## Pre-training
 You need a domain-specific E4T pre-trained model corresponding to your target image. 
 If your target image is your face, you need to pre-train on a large face image dataset. 
@@ -46,13 +54,9 @@ accelerate launch pretrain_e4t.py \
   --enable_xformers_memory_efficient_attention 
 ```
 
-### Model Zoo
-- **[e4t-diffusion-ffhq-celebahq-v1](https://huggingface.co/mshing/e4t-diffusion-ffhq-celebahq-v1):** a pre-trained model for face trained on FFHQ+CelebA-HQ. To get better results, I used [Stable unCLIP](https://github.com/Stability-AI/stablediffusion/blob/main/doc/UNCLIP.MD) as data augmentation. But, the quality at the domain-tuning phase is not as good as the paper yet... 
-  ![e4t-diffusion-ffhq-celebahq-v1](assets/e4t-diffusion-ffhq-celebahq-v1-log.png)
-
 ## Domain-tuning
 When you get a pre-trained model, you are ready for domain tuning! 
-Unlike Dreambooth, E4T needs only <15 training steps by using the domain-specific pre-trained model.  
+In this step, all parameters in addition to UNet itself (optionally text encoder) are trained. Unlike Dreambooth, E4T needs only <15 training steps according to the paper.
 
 ```
 accelerate launch tuning_e4t.py \
@@ -63,11 +67,10 @@ accelerate launch tuning_e4t.py \
   --train_image_path="image path or url" \
   --resolution=512 \
   --train_batch_size=16 \
-  --learning_rate=1.e-6 --scale_lr \
-  --max_train_steps=15 \
-  --unfreeze_clip_vision \
+  --learning_rate=1e-6 --scale_lr \
+  --max_train_steps=30 \
   --mixed_precision="fp16" \
-  --enable_xformers_memory_efficient_attention 
+  --enable_xformers_memory_efficient_attention
 ```
 
 ## Inference
@@ -92,11 +95,11 @@ I would like to thank [Stability AI](https://stability.ai/) for providing the co
 
 ```bibtex
 @misc{https://doi.org/10.48550/arXiv.2302.12228,
-    url     = {https://arxiv.org/abs/2302.12228},
-    author  = {Rinon Gal, Moab Arar, Yuval Atzmon, Amit H. Bermano, Gal Chechik, Daniel Cohen-Or},  
-    title   = {Encoder-based Domain Tuning for Fast Personalization of Text-to-Image Models},
+    url       = {https://arxiv.org/abs/2302.12228},
+    author    = {Rinon Gal, Moab Arar, Yuval Atzmon, Amit H. Bermano, Gal Chechik, Daniel Cohen-Or},  
+    title     = {Encoder-based Domain Tuning for Fast Personalization of Text-to-Image Models},
     publisher = {arXiv},
-    year    = {2023},
+    year      = {2023},
     copyright = {arXiv.org perpetual, non-exclusive license}
 }
 ```
@@ -110,3 +113,4 @@ I would like to thank [Stability AI](https://stability.ai/) for providing the co
    > Finally, we find that for the human face domain, it is helpful to
 use an off-the-shelf face segmentation network [Deng et al. 2019]
 to mask the diffusion loss at this stage.
+- [ ] Support [ToMe](https://github.com/dbolya/tomesd) for more efficient training 

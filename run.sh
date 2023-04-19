@@ -1,4 +1,5 @@
 accelerate launch pretrain_e4t.py \
+  --config_file="./pretrain_config.yaml" \
   --mixed_precision="fp16" \
   --pretrained_model_name_or_path="CompVis/stable-diffusion-v1-4" \
   --domain_class_token="art" \

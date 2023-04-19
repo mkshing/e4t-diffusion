@@ -91,7 +91,7 @@ def load_config_from_pretrained(pretrained_model_name_or_path):
 
 def load_e4t_unet(pretrained_model_name_or_path=None, ckpt_path=None, **kwargs):
     assert pretrained_model_name_or_path is not None or ckpt_path is not None
-    if pretrained_model_name_or_path is None or (ckpt_path and not os.path.exists(ckpt_path)):
+    if pretrained_model_name_or_path is None:
         if os.path.exists(ckpt_path):
             assert (
                 os.path.basename(ckpt_path) == "unet.pt"

@@ -32,6 +32,7 @@ from e4t.encoder import E4TEncoder
 from e4t.pipeline_stable_diffusion_e4t import StableDiffusionE4TPipeline
 from e4t.utils import load_e4t_unet, load_e4t_encoder, save_e4t_unet, save_e4t_encoder, image_grid
 
+wandb.login(key="9b29b8d267c2014b101852fc7faaaa3fb0b8bcbe")
 
 templates = [
     "a photo of {placeholder_token}",

@@ -1,6 +1,6 @@
 accelerate launch pretrain_e4t.py \
   --mixed_precision="fp16" \
-  --pretrained_model_name_or_path="runwayml/stable-diffusion-v1-5" \
+  --pretrained_model_name_or_path="CompVis/stable-diffusion-v1-4" \
   --domain_class_token="art" \
   --placeholder_token="*s" \
   --prompt_template="art" \

@@ -12,9 +12,8 @@ accelerate launch pretrain_e4t.py \
   --iterable_dataset \
   --resolution=256 \
   --train_batch_size=1 \
-  --learning_rate=1e-5 --scale_lr \
+  --learning_rate=1e-6 --scale_lr \
   --checkpointing_steps=10000 \
   --log_steps=1000 \
-  --max_train_steps=100000 \
+  --max_train_steps=500000 \
   --enable_xformers_memory_efficient_attention 
-  

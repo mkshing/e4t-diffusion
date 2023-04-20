@@ -3,7 +3,7 @@ accelerate launch tuning_e4t.py \
   --prompt_template="a dog in the style of {placeholder_token}" \
   --reg_lambda=0.1 \
   --output_dir="./output" \
-  --train_image_path="./training_images/isometric/isometric1.png" \
+  --train_image_path="./training_images/art/picasso.png" \
   --resolution=256 \
   --train_batch_size=16 \
   --learning_rate=1e-6 --scale_lr \

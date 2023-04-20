@@ -1,11 +1,11 @@
 accelerate launch tuning_e4t.py \
-  --pretrained_model_name_or_path="./pretrained_wikiart" \
+  --pretrained_model_name_or_path="/home/ubuntu/e4t-diffusion/pretrained-wikiart/100000/" \
   --prompt_template="a dog in the style of {placeholder_token}" \
   --reg_lambda=0.1 \
   --output_dir="./output" \
-  --train_image_path="./training_images/art/picasso.png" \
+  --train_image_path="/home/ubuntu/e4t-diffusion/training_images/art/picasso.jpg" \
   --resolution=256 \
-  --train_batch_size=16 \
+  --train_batch_size=4 \
   --learning_rate=1e-6 --scale_lr \
   --max_train_steps=30 \
   --mixed_precision="fp16" \

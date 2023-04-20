@@ -1,6 +1,6 @@
 accelerate launch tuning_e4t.py \
-  --pretrained_model_name_or_path="e4t pre-trained model path" \
-  --prompt_template="a photo of {placeholder_token}" \
+  --pretrained_model_name_or_path="./pretrained_wikiart" \
+  --prompt_template="a dog in the style of {placeholder_token}" \
   --reg_lambda=0.1 \
   --output_dir="./output" \
   --train_image_path="./training_images/isometric/isometric1.png" \

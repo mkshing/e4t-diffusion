@@ -1,8 +1,10 @@
+from io import BytesIO
 import os
 from datasets import load_dataset
 import requests
 import concurrent.futures
 import tqdm
+from PIL import Image
 
 output_folder = os.path.join(os.path.dirname(__file__), "aesthetics_65")
 dataset = load_dataset("ChristophSchuhmann/improved_aesthetics_6.5plus")
@@ -27,6 +29,11 @@ def download_image(url, output_dir):
         response.raise_for_status()
         # Save the image to the output path.
         with open(output_path, 'wb') as f:
+            try:
+                img = Image.open(BytesIO(response.content))
+            except:
+                print(f"Failed to open {url}")
+                return
             f.write(response.content)
         finished += 1
         print("Finished {}/{}".format(finished, max_items))

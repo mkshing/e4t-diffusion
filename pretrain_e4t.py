@@ -10,7 +10,7 @@ import blobfile as bf
 import itertools
 
 import numpy as np
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 import albumentations
 from einops import rearrange
 import torch
@@ -171,7 +171,11 @@ class E4TDataset(Dataset):
         if self.from_datasets:
             image = image["image"]
         else:
-            image = Image.open(image)
+            try:
+                image = Image.open(image)
+            except UnidentifiedImageError as e:
+                print(f"UnidentifiedImageError: {image}")
+                return self.__getitem__(idx + 1)
         image = np.array(image.convert("RGB"))
         image = self.processor(image=image)["image"]
         image = (image / 127.5 - 1.0).astype(np.float32)

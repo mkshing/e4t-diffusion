@@ -31,10 +31,10 @@ def download_image(url, output_dir):
         with open(output_path, 'wb') as f:
             try:
                 img = Image.open(BytesIO(response.content))
+                img.save(f, format=img.format)
             except:
                 print(f"Failed to open {url}")
                 return
-            f.write(response.content)
         finished += 1
         print("Finished {}/{}".format(finished, max_items))
     except Exception as e:

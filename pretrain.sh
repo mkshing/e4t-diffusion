@@ -4,12 +4,11 @@ accelerate launch pretrain_e4t.py \
   --domain_class_token="art" \
   --placeholder_token="*s" \
   --prompt_template="art" \
-  --save_sample_prompt="a photo of the *s,a photo of the *s in monet style" \
+  --save_sample_prompt="a photo in the style of *s,artwork in the style of *s" \
   --reg_lambda=0.01 \
   --domain_embed_scale=0.1 \
-  --output_dir="pretrained-wikiart" \
-  --train_image_dataset="Artificio/WikiArt" \
-  --iterable_dataset \
+  --output_dir="pretrained-aesthetics" \
+  --train_image_dataset="/home/ubuntu/e4t-diffusion/aesthetics_65/" \
   --resolution=256 \
   --train_batch_size=1 \
   --learning_rate=1e-6 --scale_lr \

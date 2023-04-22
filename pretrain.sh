@@ -8,8 +8,8 @@ accelerate launch pretrain_e4t.py \
   --reg_lambda=0.01 \
   --domain_embed_scale=0.1 \
   --output_dir="pretrained-aesthetics" \
-  --train_image_dataset="/home/ubuntu/e4t-diffusion/aesthetics_65/" \
-  --resolution=256 \
+  --train_image_dataset="/home/ubuntu/e4t-diffusion/diffusiondb/" \
+  --resolution=512 \
   --train_batch_size=1 \
   --learning_rate=1e-6 \
   --lr_scheduler=polynomial \

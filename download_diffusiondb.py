@@ -151,7 +151,7 @@ def download(index=1, range_index=0, output="", large=False):
         return files_to_unzip
 
 
-def unzip_file(file: str):
+def unzip_file(file: str, output: str = None):
     """
     > This function takes a zip file as an argument and unpacks it
 
@@ -159,11 +159,11 @@ def unzip_file(file: str):
     :type file: str
     :return: The file name without the .zip extension
     """
-    shutil.unpack_archive(file)
+    shutil.unpack_archive(file, extract_dir=output)
     return f"File: {file.replace('.zip', '')} has been unzipped"
 
 
-def unzip_all(files: list):
+def unzip_all(files: list, output: str = None):
     """
     > Unzip all files in a list of files
 
@@ -172,7 +172,7 @@ def unzip_all(files: list):
     """
     with alive_bar(len(files), title="Unzipping files") as bar:
         for file in files:
-            unzip_file(file)
+            unzip_file(file, output)
             time.sleep(0.1)
             bar()
 
@@ -199,7 +199,7 @@ def main(index=None, range_max=None, output=None, unzip=None, large=None):
     if index and range_max:
         files = download(index, range_max, output, large)
         if unzip:
-            unzip_all(files)
+            unzip_all(files, output)
     elif index:
         download(index, output=output, large=large)
     else:

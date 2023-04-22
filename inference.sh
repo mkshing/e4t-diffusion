@@ -7,7 +7,7 @@ echo "Prompt: $PROMPT"
 echo "Input path: $INPUT_PATH"
 
 python inference.py \
-  --pretrained_model_name_or_path "./output/30/" \
+  --pretrained_model_name_or_path "./output/$PROJECT/30/" \
   --prompt "$PROMPT" \
   --num_images_per_prompt 3 \
   --scheduler_type "ddim" \

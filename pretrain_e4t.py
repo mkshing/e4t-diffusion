@@ -166,7 +166,7 @@ class E4TDataset(Dataset):
     def __len__(self):
         return len(self.dataset)
 
-    def __getitem__(self, idx):
+    def __getitem__(self,idx):
         image = self.dataset[idx]
         if self.from_datasets:
             image = image["image"]

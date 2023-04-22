@@ -150,7 +150,8 @@ def main():
                 width=args.width,
             ).images
         all_images.extend(images)
-        images[0].save(f"{output_dir}/{prompt}.png")
+        for i, img in enumerate(images):
+            img.save(f"{output_dir}/{prompt}_{i}.png")
     grid_image = image_grid(all_images, len(prompts), args.num_images_per_prompt)
     grid_image.save(f"{output_dir}/grid.png")
     print("DONE! See `grid.png` for the results!")

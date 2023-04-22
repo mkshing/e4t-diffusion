@@ -11,7 +11,9 @@ accelerate launch pretrain_e4t.py \
   --train_image_dataset="/home/ubuntu/e4t-diffusion/aesthetics_65/" \
   --resolution=256 \
   --train_batch_size=1 \
-  --learning_rate=1e-6 --scale_lr \
+  --learning_rate=1e-6 \
+  --lr_scheduler=polynomial \
+  --scale_lr \
   --checkpointing_steps=10000 \
   --log_steps=1000 \
   --max_train_steps=500000 \

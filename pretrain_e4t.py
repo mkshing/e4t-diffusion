@@ -10,7 +10,7 @@ import blobfile as bf
 import itertools
 
 import numpy as np
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 import albumentations
 from einops import rearrange
 import torch
@@ -32,6 +32,7 @@ from e4t.encoder import E4TEncoder
 from e4t.pipeline_stable_diffusion_e4t import StableDiffusionE4TPipeline
 from e4t.utils import load_e4t_unet, load_e4t_encoder, save_e4t_unet, save_e4t_encoder, image_grid
 
+wandb.login(key="9b29b8d267c2014b101852fc7faaaa3fb0b8bcbe")
 
 templates = [
     "a photo of {placeholder_token}",
@@ -165,12 +166,16 @@ class E4TDataset(Dataset):
     def __len__(self):
         return len(self.dataset)
 
-    def __getitem__(self, idx):
+    def __getitem__(self,idx):
         image = self.dataset[idx]
         if self.from_datasets:
             image = image["image"]
         else:
-            image = Image.open(image)
+            try:
+                image = Image.open(image)
+            except UnidentifiedImageError as e:
+                print(f"UnidentifiedImageError: {image}")
+                return self.__getitem__(idx + 1)
         image = np.array(image.convert("RGB"))
         image = self.processor(image=image)["image"]
         image = (image / 127.5 - 1.0).astype(np.float32)

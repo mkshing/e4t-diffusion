@@ -56,5 +56,6 @@ wandb
 pretrained-*
 tuning-*
 models
-*.sh
 grid.png
+aesthetics_65/*
+output/*

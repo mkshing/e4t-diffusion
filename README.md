@@ -32,8 +32,8 @@ If your target image is your face, you need to pre-train on a large face image d
 Or, if you have an artistic image, you might want to train on WikiArt like so.  
 ```
 accelerate launch pretrain_e4t.py \
-  --pretrained_model_name_or_path="CompVis/stable-diffusion-v1-4" \
-  --clip_model_name_or_path="ViT-H-14::laion2b_s32b_b79k" \
+  --mixed_precision="fp16" \
+  --pretrained_model_name_or_path="runwayml/stable-diffusion-v1-5" \
   --domain_class_token="art" \
   --placeholder_token="*s" \
   --prompt_template="art" \
@@ -44,13 +44,12 @@ accelerate launch pretrain_e4t.py \
   --train_image_dataset="Artificio/WikiArt" \
   --iterable_dataset \
   --resolution=512 \
-  --train_batch_size=16 \
+  --train_batch_size=1 \
   --learning_rate=1e-6 --scale_lr \
   --checkpointing_steps=10000 \
   --log_steps=1000 \
   --max_train_steps=100000 \
   --unfreeze_clip_vision \
-  --mixed_precision="fp16" \
   --enable_xformers_memory_efficient_attention 
 ```
 

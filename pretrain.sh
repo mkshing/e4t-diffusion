@@ -1,0 +1,19 @@
+accelerate launch pretrain_e4t.py \
+  --mixed_precision="fp16" \
+  --pretrained_model_name_or_path="CompVis/stable-diffusion-v1-4" \
+  --domain_class_token="art" \
+  --placeholder_token="*s" \
+  --prompt_template="art" \
+  --save_sample_prompt="a photo in the style of *s,artwork in the style of *s" \
+  --reg_lambda=0.02 \
+  --domain_embed_scale=0.2 \
+  --output_dir="pretrained-diffusiondb" \
+  --train_image_dataset="/home/ubuntu/e4t-diffusion/diffusondb/" \
+  --resolution=512 \
+  --train_batch_size=1 \
+  --learning_rate=2e-6 \
+  --scale_lr \
+  --checkpointing_steps=10000 \
+  --log_steps=1000 \
+  --max_train_steps=100000 \
+  --enable_xformers_memory_efficient_attention 

@@ -22,7 +22,7 @@ class AttributeDict(object):
         return self.obj.items()
 
     def __setstate__(self, items):
-        if not hasattr(self, 'obj'):
+        if not hasattr(self, "obj"):
             self.obj = {}
         for key, val in items:
             self.obj[key] = val
@@ -43,11 +43,7 @@ class AttributeDict(object):
 def download_from_huggingface(repo, filename, **kwargs):
     while True:
         try:
-            return huggingface_hub.hf_hub_download(
-                repo,
-                filename=filename,
-                **kwargs
-            )
+            return huggingface_hub.hf_hub_download(repo, filename=filename, **kwargs)
         except HTTPError as e:
             if e.response.status_code == 401:
                 # Need to log into huggingface api
@@ -76,13 +72,17 @@ FILES = ["weight_offsets.pt", "encoder.pt", "config.json"]
 def load_config_from_pretrained(pretrained_model_name_or_path):
     if os.path.exists(pretrained_model_name_or_path):
         if "config.json" not in pretrained_model_name_or_path:
-            pretrained_model_name_or_path = os.path.join(pretrained_model_name_or_path, "config.json")
+            pretrained_model_name_or_path = os.path.join(
+                pretrained_model_name_or_path, "config.json"
+            )
     else:
-        assert pretrained_model_name_or_path in MODELS, f"Choose from {list(MODELS.keys())}"
+        assert (
+            pretrained_model_name_or_path in MODELS
+        ), f"Choose from {list(MODELS.keys())}"
         pretrained_model_name_or_path = download_from_huggingface(
             repo=MODELS[pretrained_model_name_or_path]["repo"],
             filename="config.json",
-            subfolder=MODELS[pretrained_model_name_or_path]["subfolder"]
+            subfolder=MODELS[pretrained_model_name_or_path]["subfolder"],
         )
     with open(pretrained_model_name_or_path, "r", encoding="utf-8") as f:
         pretrained_args = AttributeDict(json.load(f))
@@ -91,9 +91,12 @@ def load_config_from_pretrained(pretrained_model_name_or_path):
 
 def load_e4t_unet(pretrained_model_name_or_path=None, ckpt_path=None, **kwargs):
     assert pretrained_model_name_or_path is not None or ckpt_path is not None
-    if pretrained_model_name_or_path is None or not os.path.exists(ckpt_path):
+    if pretrained_model_name_or_path is None:
         if os.path.exists(ckpt_path):
-            assert os.path.basename(ckpt_path) == "unet.pt" or os.path.basename(ckpt_path) == "weight_offsets.pt", "You must specify the filename! (`unet.pt` or `weight_offsets.pt`)"
+            assert (
+                os.path.basename(ckpt_path) == "unet.pt"
+                or os.path.basename(ckpt_path) == "weight_offsets.pt"
+            ), "You must specify the filename! (`unet.pt` or `weight_offsets.pt`)"
             config = load_config_from_pretrained(os.path.dirname(ckpt_path))
         else:
             assert ckpt_path in MODELS, f"Choose from {list(MODELS.keys())}"
@@ -102,16 +105,22 @@ def load_e4t_unet(pretrained_model_name_or_path=None, ckpt_path=None, **kwargs):
                 ckpt_path = download_from_huggingface(
                     repo=MODELS[ckpt_path]["repo"],
                     filename="weight_offsets.pt",
-                    subfolder=MODELS[ckpt_path]["subfolder"]
+                    subfolder=MODELS[ckpt_path]["subfolder"],
                 )
             except EntryNotFoundError:
                 ckpt_path = download_from_huggingface(
                     repo=MODELS[ckpt_path]["repo"],
                     filename="unet.pt",
-                    subfolder=MODELS[ckpt_path]["subfolder"]
+                    subfolder=MODELS[ckpt_path]["subfolder"],
                 )
-        pretrained_model_name_or_path = config.pretrained_model_name_or_path if config.pretrained_args is None else config.pretrained_args["pretrained_model_name_or_path"]
-    unet = OriginalUNet2DConditionModel.from_pretrained(pretrained_model_name_or_path, subfolder="unet", **kwargs)
+        pretrained_model_name_or_path = (
+            config.pretrained_model_name_or_path
+            if config.pretrained_args is None
+            else config.pretrained_args["pretrained_model_name_or_path"]
+        )
+    unet = OriginalUNet2DConditionModel.from_pretrained(
+        pretrained_model_name_or_path, subfolder="unet", **kwargs
+    )
     state_dict = dict(unet.state_dict())
     if ckpt_path:
         ckpt_sd = torch.load(ckpt_path, map_location="cpu")
@@ -142,7 +151,7 @@ def load_e4t_encoder(ckpt_path=None, **kwargs):
             ckpt_path = download_from_huggingface(
                 repo=MODELS[ckpt_path]["repo"],
                 filename="encoder.pt",
-                subfolder=MODELS[ckpt_path]["subfolder"]
+                subfolder=MODELS[ckpt_path]["subfolder"],
             )
         state_dict = torch.load(ckpt_path, map_location="cpu")
         print(f"Resuming from {ckpt_path}")
@@ -182,7 +191,7 @@ def image_grid(imgs, rows, cols):
     assert len(imgs) == rows * cols
 
     w, h = imgs[0].size
-    grid = Image.new('RGB', size=(cols * w, rows * h))
+    grid = Image.new("RGB", size=(cols * w, rows * h))
     grid_w, grid_h = grid.size
 
     for i, img in enumerate(imgs):
